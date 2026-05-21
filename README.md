@@ -47,6 +47,19 @@ pip install -r requirements.txt
 Copy-Item .env.example .env  # edit values
 uvicorn app.main:app --reload
 ```
+if that doesn't work
+
+```powershell
+cd backend
+irm https://astral.sh/uv/install.ps1 | iex
+$env:Path = "C:\Users\yourfolder\.local\bin;$env:Path"
+uv venv --python 3.12 .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item .env.example .env  # edit values
+uvicorn app.main:app --reload
+```
+
 
 Backend runs at http://localhost:8000 (`/docs` for the Swagger UI).
 
