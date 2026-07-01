@@ -37,9 +37,9 @@ export default function ExamView() {
     })();
   }, [id, user]);
 
-  async function download() {
+  async function download(format: "pdf" | "docx") {
     if (!exam) return;
-    const { url } = await apiFetch<{ url: string }>(`/api/exams/${exam.id}/download`);
+    const { url } = await apiFetch<{ url: string }>(`/api/exams/${exam.id}/download?format=${format}`);
     window.open(url, "_blank");
   }
 
@@ -108,26 +108,28 @@ export default function ExamView() {
               >
                 <Pencil size={15} /> Edit
               </button>
-              {exam.status === "ready" && exam.export_path && (
-                <button
-                  onClick={() => void download()}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    backgroundColor: "#181d27",
-                    color: "#fff",
-                    borderRadius: 9999,
-                    padding: "8px 16px",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    border: "none",
-                    cursor: "pointer",
-                  }}
-                >
-                  <Download size={16} /> Download {exam.export_format?.toUpperCase()}
-                </button>
-              )}
+              {exam.status === "ready" &&
+                (exam.content ? (["pdf", "docx"] as const) : exam.export_path ? [exam.export_format ?? "pdf"] : []).map((fmt) => (
+                  <button
+                    key={fmt}
+                    onClick={() => void download(fmt)}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      backgroundColor: "#181d27",
+                      color: "#fff",
+                      borderRadius: 9999,
+                      padding: "8px 16px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Download size={16} /> {fmt.toUpperCase()}
+                  </button>
+                ))}
             </div>
           )}
         </div>

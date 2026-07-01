@@ -101,8 +101,8 @@ export default function ExamRoute() {
       disabled={atLimit}
       onExamGenerated={() => {}}
       onGenerate={handleGenerate}
-      onDownload={async (examId) => {
-        const { url } = await apiFetch<{ url: string }>(`/api/exams/${examId}/download`);
+      onDownload={async (examId, format) => {
+        const { url } = await apiFetch<{ url: string }>(`/api/exams/${examId}/download?format=${format}`);
         window.open(url, "_blank");
       }}
       onViewExam={(examId) => navigate(`/exams/${examId}`)}

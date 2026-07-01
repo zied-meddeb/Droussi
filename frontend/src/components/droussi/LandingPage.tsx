@@ -53,7 +53,7 @@ interface Step {
   conclusion?: boolean;
 }
 const STEPS: Step[] = [
-  { side: "left", Icon: Upload, tint: "#cce7ff", color: "#0069e0", title: "Drop in your material", body: "Add lecture PDFs, slides, DOCX or notes. Droussi reads them so you never type a question by hand.", illo: uploadIllo },
+  { side: "left", Icon: Upload, tint: "#cce7ff", color: "#0069e0", title: "Drop in your material", body: "Add lecture PDFs. Droussi reads them so you never type a question by hand.", illo: uploadIllo },
   { side: "right", Icon: Settings2, tint: "#f1e6ff", color: "#9552e0", title: "Shape the exam", body: "Pick how many MCQs, short answers and essays you want, then set the difficulty and duration.", illo: shapeIllo },
   { side: "left", Icon: Sparkles, tint: "#ffe6d1", color: "#e05a00", title: "Let the AI write it", body: "Droussi drafts a complete, coherent exam from your material in seconds — questions, options and all.", illo: aiIllo },
   { side: "right", Icon: Download, tint: "#d3f6e3", color: "#1aa06d", title: "Export & share", body: "Download a clean PDF or an editable DOCX, ready to print, hand out, or upload to your LMS.", illo: exportIllo },

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./hooks/useAuth";
 import { LanguageProvider } from "./contexts/LanguageContext";
 import AppShell from "./layouts/AppShell";
+import { ToastHost } from "./components/droussi/ToastHost";
 import LandingRoute from "./pages/routes/LandingRoute";
 import LoginRoute from "./pages/routes/LoginRoute";
 import DashboardRoute from "./pages/routes/DashboardRoute";
@@ -40,6 +41,7 @@ function Protected({ children }: { children: JSX.Element }) {
 export default function App() {
   return (
     <LanguageProvider>
+    <ToastHost />
     <Routes>
       <Route path="/" element={<LandingRoute />} />
       <Route path="/login" element={<LoginRoute />} />

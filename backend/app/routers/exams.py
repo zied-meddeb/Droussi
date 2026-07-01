@@ -28,8 +28,14 @@ def _render_and_upload(
     exam_id: str,
     content: ExamContent,
     export_format: str,
+    stable: bool = False,
 ) -> str:
-    """Render the exam to the requested format, upload it, return the storage path."""
+    """Render the exam to the requested format, upload it, return the storage path.
+
+    When ``stable`` is set the file is stored at a fixed per-exam-per-format path
+    (and upserted), so on-demand downloads of a format don't accumulate a new
+    object on every click.
+    """
     if export_format == "docx":
         export_bytes = exporter.to_docx(content)
         ext = "docx"
@@ -41,7 +47,11 @@ def _render_and_upload(
         ext = "pdf"
         content_type = "application/pdf"
 
-    export_path = f"{user_id}/{exam_id}-{uuid.uuid4().hex}.{ext}"
+    export_path = (
+        f"{user_id}/{exam_id}.{ext}"
+        if stable
+        else f"{user_id}/{exam_id}-{uuid.uuid4().hex}.{ext}"
+    )
     try:
         sb.storage.from_(settings.exports_bucket).upload(
             export_path,
@@ -276,7 +286,7 @@ def update_content(
 @router.get(
     "/{exam_id}/download",
     responses={
-        404: {"description": "Export not ready"},
+        404: {"description": "Export not ready / format unavailable"},
         500: {"description": "Could not sign the download URL"},
     },
 )
@@ -284,20 +294,53 @@ def download_url(
     exam_id: str,
     user: Annotated[CurrentUser, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
+    export_format: Annotated[Literal["pdf", "docx"] | None, Query(alias="format")] = None,
 ) -> dict[Literal["url"], str]:
+    """Return a signed URL for the exam in the requested format.
+
+    The format defaults to the one chosen at generation. Any other format is
+    rendered on the fly from the exam's saved content, so both PDF and DOCX are
+    always available without regenerating the exam.
+    """
     sb = get_supabase()
     row = (
         sb.table("exams")
-        .select("export_path")
+        .select("content, export_format, export_path")
         .eq("id", exam_id)
         .eq("user_id", user.id)
         .maybe_single()
         .execute()
     )
-    if not row.data or not row.data.get("export_path"):
-        raise HTTPException(status_code=404, detail="Export not ready")
+    if not row.data:
+        raise HTTPException(status_code=404, detail="Exam not found")
+
+    data = row.data
+    stored_format = data.get("export_format") or "pdf"
+    fmt = export_format or stored_format
+
+    if fmt == stored_format and data.get("export_path"):
+        # The format rendered at generation — reuse the stored file.
+        export_path = data["export_path"]
+    elif data.get("content"):
+        # A different format — render it now from the saved exam content.
+        content = ExamContent.model_validate(data["content"])
+        export_path = _render_and_upload(
+            sb,
+            settings,
+            user_id=user.id,
+            exam_id=exam_id,
+            content=content,
+            export_format=fmt,
+            stable=True,
+        )
+    else:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{fmt.upper()} export isn't available for this exam.",
+        )
+
     signed = sb.storage.from_(settings.exports_bucket).create_signed_url(
-        row.data["export_path"], 3600
+        export_path, 3600
     )
     url = signed.get("signedURL") or signed.get("signed_url")
     if not url:

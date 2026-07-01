@@ -87,7 +87,9 @@ export function examToOutput(exam: ExamRow, subject = "General") {
     duration: 60,
     questions: content?.exercises.length ?? 0,
     totalMarks: content?.total_points ?? exam.spec?.total_points ?? 0,
-    formats: exam.export_format ? [exam.export_format] : ["pdf", "docx"],
+    // Both formats are always downloadable when we have the exam content to
+    // render from; otherwise fall back to whatever was rendered at generation.
+    formats: content ? ["pdf", "docx"] : exam.export_format ? [exam.export_format] : ["pdf"],
     status: exam.status === "ready" ? ("ready" as const) : ("processing" as const),
   };
 }
