@@ -47,8 +47,8 @@ class DocumentOut(BaseModel):
     user_id: str
     filename: str
     storage_path: str
-    mime_type: Optional[str]
-    size_bytes: Optional[int]
+    mime_type: Optional[str] = None
+    size_bytes: Optional[int] = None
     created_at: str
 
 
@@ -98,12 +98,12 @@ class UpdateExamContentRequest(BaseModel):
 class ExamOut(BaseModel):
     id: str
     user_id: str
-    document_id: Optional[str]
-    title: Optional[str]
+    document_id: Optional[str] = None
+    title: Optional[str] = None
     spec: ExamSpec | dict
-    content: Optional[ExamContent | dict]
-    export_format: Optional[ExportFormat]
-    export_path: Optional[str]
+    content: Optional[ExamContent | dict] = None
+    export_format: Optional[ExportFormat] = None
+    export_path: Optional[str] = None
     status: str
     created_at: str
 

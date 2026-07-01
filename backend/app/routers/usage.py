@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 
 from ..auth import CurrentUser, get_current_user
@@ -8,8 +10,10 @@ from ..services import usage as usage_service
 router = APIRouter(prefix="/api/usage", tags=["usage"])
 
 
-@router.get("", response_model=UsageOut)
-def get_daily_usage(user: CurrentUser = Depends(get_current_user)) -> UsageOut:
+@router.get("")
+def get_daily_usage(
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> UsageOut:
     snapshot = usage_service.get_usage(user.id, user.email)
     return UsageOut(
         exams_used=snapshot.exams_used,

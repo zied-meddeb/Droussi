@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..auth import CurrentUser, get_current_user
@@ -10,11 +12,19 @@ from ..services.pdf_parser import extract_text
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 
-@router.post("/register", response_model=DocumentOut)
+@router.post(
+    "/register",
+    responses={
+        403: {"description": "Storage path does not belong to the user"},
+        400: {"description": "Could not read the uploaded file"},
+        422: {"description": "Could not parse the document"},
+        500: {"description": "Database insert failed"},
+    },
+)
 def register_document(
     body: RegisterDocumentRequest,
-    user: CurrentUser = Depends(get_current_user),
-    settings: Settings = Depends(get_settings),
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> DocumentOut:
     sb = get_supabase()
 
@@ -61,11 +71,15 @@ def register_document(
     return DocumentOut.model_validate(inserted.data[0])
 
 
-@router.delete("/{doc_id}", status_code=204)
+@router.delete(
+    "/{doc_id}",
+    status_code=204,
+    responses={404: {"description": "Document not found"}},
+)
 def delete_document(
     doc_id: str,
-    user: CurrentUser = Depends(get_current_user),
-    settings: Settings = Depends(get_settings),
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
     sb = get_supabase()
     row = (

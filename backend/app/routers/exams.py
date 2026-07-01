@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -53,10 +53,16 @@ def _render_and_upload(
     return export_path
 
 
-@router.post("/draft", response_model=ExamOut)
+@router.post(
+    "/draft",
+    responses={
+        404: {"description": "Document not found"},
+        500: {"description": "Could not create draft"},
+    },
+)
 def create_draft(
-    document_id: str = Query(...),
-    user: CurrentUser = Depends(get_current_user),
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    document_id: Annotated[str, Query()],
 ) -> ExamOut:
     """Create an empty draft exam row that the generate step then fills in."""
     sb = get_supabase()
@@ -101,12 +107,22 @@ def create_draft(
     return ExamOut.model_validate(inserted.data[0])
 
 
-@router.post("/{exam_id}/generate", response_model=ExamOut)
+@router.post(
+    "/{exam_id}/generate",
+    responses={
+        400: {"description": "Too many documents requested"},
+        404: {"description": "Documents not found"},
+        422: {"description": "Documents have no extracted text"},
+        500: {"description": "Export upload or database update failed"},
+        502: {"description": "Exam generation failed"},
+        504: {"description": "Exam generation timed out"},
+    },
+)
 async def generate(
     exam_id: str,
     body: GenerateExamRequest,
-    user: CurrentUser = Depends(get_current_user),
-    settings: Settings = Depends(get_settings),
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> ExamOut:
     sb = get_supabase()
 
@@ -193,12 +209,18 @@ async def generate(
     return ExamOut.model_validate(updated.data[0])
 
 
-@router.put("/{exam_id}/content", response_model=ExamOut)
+@router.put(
+    "/{exam_id}/content",
+    responses={
+        404: {"description": "Exam not found"},
+        500: {"description": "Export upload or database update failed"},
+    },
+)
 def update_content(
     exam_id: str,
     body: UpdateExamContentRequest,
-    user: CurrentUser = Depends(get_current_user),
-    settings: Settings = Depends(get_settings),
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> ExamOut:
     """Save user edits to a generated exam (title, questions, per-exercise
     grading) and re-render the downloadable export. Does not consume an exam
@@ -251,11 +273,17 @@ def update_content(
     return ExamOut.model_validate(updated.data[0])
 
 
-@router.get("/{exam_id}/download")
+@router.get(
+    "/{exam_id}/download",
+    responses={
+        404: {"description": "Export not ready"},
+        500: {"description": "Could not sign the download URL"},
+    },
+)
 def download_url(
     exam_id: str,
-    user: CurrentUser = Depends(get_current_user),
-    settings: Settings = Depends(get_settings),
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[Literal["url"], str]:
     sb = get_supabase()
     row = (

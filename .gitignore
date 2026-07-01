@@ -4,3 +4,13 @@
 *.log
 .env
 node_modules/
+
+# Test / coverage artifacts
+.venv/
+htmlcov/
+coverage/
+coverage.xml
+.coverage
+.pytest_cache/
+.scannerwork/
+.sonar-token

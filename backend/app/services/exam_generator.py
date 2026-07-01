@@ -1,7 +1,4 @@
 import json
-import re
-
-from pydantic import ValidationError
 
 from ..models.schemas import ExamContent, ExamSpec
 from ..prompts.exam_prompt import SYSTEM_PROMPT, build_user_prompt
@@ -10,11 +7,20 @@ from . import usage as usage_service
 
 
 def _extract_json(text: str) -> str:
-    """OpenRouter free models sometimes wrap JSON in markdown fences — strip them."""
+    """OpenRouter free models sometimes wrap JSON in markdown fences — strip them.
+
+    Uses plain string operations rather than a regex: the input is untrusted LLM
+    output, and an ambiguous regex here would be vulnerable to catastrophic
+    backtracking (ReDoS).
+    """
     text = text.strip()
-    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.DOTALL)
-    if fence:
-        return fence.group(1).strip()
+    if text.startswith("```"):
+        inner = text[3:]
+        if inner[:4].lower() == "json":
+            inner = inner[4:]
+        if inner.endswith("```"):
+            inner = inner[:-3]
+        text = inner.strip()
     # find first { ... last }
     first = text.find("{")
     last = text.rfind("}")
@@ -59,7 +65,7 @@ async def generate_exam(
 
     last_error: Exception | None = None
     cost_usd = 0.0  # accumulate across retries so we bill the true spend once
-    for attempt in range(2):
+    for _ in range(2):
         try:
             result = await llm.chat(
                 messages, response_format_json=True, max_tokens=2500
@@ -74,7 +80,9 @@ async def generate_exam(
             # One exam = one quota credit, billed with the full cost of all attempts.
             usage_service.record_exam(user_id, cost_usd)
             return _fix_points(content, spec)
-        except (json.JSONDecodeError, ValidationError, ValueError) as e:
+        # JSONDecodeError and pydantic's ValidationError both derive from
+        # ValueError, so a single ValueError catch covers all three.
+        except ValueError as e:
             last_error = e
             messages.append(
                 {

@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -12,12 +14,15 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="Exam Generator API")
 
+    # Restrict CORS to the exact origins/methods/headers the SPA uses rather
+    # than wildcards — a permissive policy combined with credentials is a
+    # security risk (SonarQube S5122).
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
     )
 
     app.include_router(documents.router)
@@ -29,10 +34,10 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/api/me", response_model=MeOut)
+    @app.get("/api/me")
     def me(
-        user: CurrentUser = Depends(get_current_user),
-        cfg: Settings = Depends(get_settings),
+        user: Annotated[CurrentUser, Depends(get_current_user)],
+        cfg: Annotated[Settings, Depends(get_settings)],
     ) -> MeOut:
         return MeOut(
             id=user.id,

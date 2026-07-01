@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..auth import CurrentUser, get_current_user
@@ -15,8 +17,8 @@ def is_super_admin(email: str | None, settings: Settings) -> bool:
 
 
 def require_admin(
-    user: CurrentUser = Depends(get_current_user),
-    settings: Settings = Depends(get_settings),
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> CurrentUser:
     if not is_super_admin(user.email, settings):
         raise HTTPException(
@@ -26,10 +28,13 @@ def require_admin(
     return user
 
 
-@router.get("/overview", response_model=AdminOverviewOut)
+@router.get(
+    "/overview",
+    responses={403: {"description": "Super-admin access required"}},
+)
 async def overview(
-    _: CurrentUser = Depends(require_admin),
-    settings: Settings = Depends(get_settings),
+    _: Annotated[CurrentUser, Depends(require_admin)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> AdminOverviewOut:
     totals = usage_service.admin_totals()
     rankings = usage_service.admin_user_rankings()
