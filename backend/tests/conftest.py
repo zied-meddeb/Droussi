@@ -7,6 +7,8 @@ os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-jwt-secret")
 os.environ.setdefault("OPENROUTER_API_KEY", "test-openrouter-key")
 os.environ.setdefault("SUPER_ADMIN_EMAILS", "admin@test.com")
+# Tests fire many requests from one client key; keep rate limiting out of the way.
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 
 import pytest
 from fastapi.testclient import TestClient

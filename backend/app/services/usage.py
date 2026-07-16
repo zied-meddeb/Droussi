@@ -39,10 +39,6 @@ def _resets_at_utc(usage_date: date) -> datetime:
     )
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def register_user(user_id: str, email: str | None = None) -> None:
     sb = get_supabase()
     record: dict = {"user_id": user_id}
@@ -155,16 +151,18 @@ def ensure_can_generate_exam(user_id: str, email: str | None = None) -> UsageSna
 
 
 def _increment_daily(user_id: str, *, exams: int, cost_usd: float) -> None:
-    usage_date = _today_utc()
-    row = _get_or_create_daily_row(user_id, usage_date)
+    # Single atomic upsert (see migration 0006). Folding the read and write into
+    # one statement prevents the lost-update race where concurrent generations
+    # both read the same count and each write back +1.
     sb = get_supabase()
-    sb.table("user_daily_usage").update(
+    sb.rpc(
+        "increment_daily_usage",
         {
-            "exam_count": int(row.get("exam_count") or 0) + exams,
-            "cost_usd": float(row.get("cost_usd") or 0.0) + max(cost_usd, 0.0),
-            "updated_at": _now_iso(),
-        }
-    ).eq("user_id", user_id).eq("usage_date", usage_date.isoformat()).execute()
+            "p_user_id": user_id,
+            "p_exams": int(exams),
+            "p_cost": max(float(cost_usd), 0.0),
+        },
+    ).execute()
 
 
 def record_exam(user_id: str, cost_usd: float) -> None:

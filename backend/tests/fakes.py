@@ -54,14 +54,27 @@ class FakeStorage:
 
 class FakeSupabase:
     """Configure with `tables={"documents": [FakeResp(...), ...]}` — successive
-    execute() calls against a table pop responses in order."""
+    execute() calls against a table pop responses in order. Optionally configure
+    `rpcs={"increment_daily_usage": [FakeResp(...)]}` the same way."""
 
-    def __init__(self, tables=None, download=b"", signed_url="https://signed.example/f"):
+    def __init__(
+        self,
+        tables=None,
+        download=b"",
+        signed_url="https://signed.example/f",
+        rpcs=None,
+    ):
         self._tables = tables or {}
+        self._rpcs = rpcs or {}
+        self.rpc_calls = []
         self.storage = FakeStorage(download=download, signed_url=signed_url)
 
     def table(self, name):
         return FakeQuery(self._tables.get(name, []))
+
+    def rpc(self, name, params=None):
+        self.rpc_calls.append((name, params))
+        return FakeQuery(self._rpcs.get(name, []))
 
 
 class FakeResponse:

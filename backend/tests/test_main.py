@@ -1,4 +1,5 @@
 """Tests for the top-level app routes."""
+from .fakes import FakeResp, FakeSupabase
 
 
 class TestHealth:
@@ -16,3 +17,18 @@ class TestMe:
         assert body["id"] == "user123"
         assert body["email"] == "user@test.com"
         assert body["is_admin"] is False
+
+
+class TestDeleteMe:
+    def test_deletes_user_data_and_returns_204(self, client, monkeypatch):
+        sb = FakeSupabase(
+            tables={
+                "documents": [FakeResp([{"storage_path": "user123/a.pdf"}])],
+                "exams": [FakeResp([{"export_path": "user123/a.pdf"}])],
+            }
+        )
+        monkeypatch.setattr("app.main.get_supabase", lambda: sb)
+        r = client.delete("/api/me")
+        assert r.status_code == 204
+        # Both the document and the export objects were removed from storage.
+        assert sb.storage.removed == [["user123/a.pdf"], ["user123/a.pdf"]]

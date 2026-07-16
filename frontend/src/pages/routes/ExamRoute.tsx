@@ -14,6 +14,28 @@ import {
 import { getDocumentMetaOrDefault } from "../../lib/documentMeta";
 import type { ExamRow } from "../../types";
 
+const POLL_INTERVAL_MS = 2000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Poll an exam row until generation finishes (ready/error) or the deadline. */
+async function pollExamUntilDone(
+  examId: string,
+  timeoutMs: number
+): Promise<ExamRow> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const exam = await apiFetch<ExamRow>(`/api/exams/${examId}`);
+    if (exam.status === "ready" || exam.status === "error") return exam;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    "Exam generation is taking longer than expected. Check My Outputs shortly."
+  );
+}
+
 export default function ExamRoute() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -70,19 +92,26 @@ export default function ExamRoute() {
       language: params.language,
     });
 
-    const exam = await apiFetch<ExamRow>(`/api/exams/${draft.id}/generate`, {
+    // Start generation in the background, then poll the exam's status. This
+    // avoids holding a single HTTP request open for the full multi-minute LLM
+    // call (which the platform may cut off).
+    await apiFetch<ExamRow>(`/api/exams/${draft.id}/generate-async`, {
       method: "POST",
       body: JSON.stringify({
         document_id: primaryId,
         document_ids: params.documentIds,
         spec,
       }),
-      timeoutMs: 190_000,
     });
+
+    const exam = await pollExamUntilDone(draft.id, 190_000);
 
     await refresh();
     await reload();
 
+    if (exam.status === "error") {
+      throw new Error("Exam generation failed. Please try again.");
+    }
     if (!exam.content) throw new Error("Exam generated but content is missing.");
     const view = examContentToGenerated(exam.id, exam.content, params.duration);
     view.title = params.examTitle || view.title;

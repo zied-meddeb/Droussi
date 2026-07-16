@@ -50,6 +50,11 @@ async function authHeader(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/** GDPR/CCPA: permanently delete all of the current user's data. */
+export async function deleteMyData(): Promise<void> {
+  await apiFetch<void>("/api/me", { method: "DELETE" });
+}
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit & { timeoutMs?: number } = {}

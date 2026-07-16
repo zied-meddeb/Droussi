@@ -17,7 +17,9 @@ class ExamSpec(BaseModel):
     per_exercise_points: list[int]
     export_format: ExportFormat
     language: Language = "en"
-    extra_instructions: Optional[str] = None
+    # Bounded so a client can't inflate the prompt (and thus token cost) with a
+    # multi-megabyte string.
+    extra_instructions: Optional[str] = Field(default=None, max_length=2000)
 
     @field_validator("per_exercise_points")
     @classmethod

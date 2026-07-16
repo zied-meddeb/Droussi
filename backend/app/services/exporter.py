@@ -1,4 +1,5 @@
 import io
+from xml.sax.saxutils import escape
 
 from docx import Document
 from docx.shared import Pt
@@ -14,6 +15,19 @@ from reportlab.platypus import (
 )
 
 from ..models.schemas import ExamContent
+
+
+def _pdf_text(value: str, *, keep_linebreaks: bool = False) -> str:
+    """Escape user/LLM-provided text for ReportLab's mini-markup.
+
+    ReportLab ``Paragraph`` interprets a subset of HTML-like tags, so raw ``<``,
+    ``>``, and ``&`` from exam content could break rendering or inject markup.
+    Escape first, then (optionally) re-introduce ``<br/>`` for real newlines.
+    """
+    escaped = escape(value or "")
+    if keep_linebreaks:
+        escaped = escaped.replace("\n", "<br/>")
+    return escaped
 
 
 def to_docx(exam: ExamContent) -> bytes:
@@ -72,7 +86,7 @@ def to_pdf(exam: ExamContent) -> bytes:
     body = styles["BodyText"]
 
     story: list = [
-        Paragraph(exam.title or "Exam", h1),
+        Paragraph(_pdf_text(exam.title or "Exam"), h1),
         Paragraph(f"<b>Total: {exam.total_points} points</b>", body),
         Spacer(1, 0.5 * cm),
     ]
@@ -84,11 +98,11 @@ def to_pdf(exam: ExamContent) -> bytes:
                 h2,
             )
         )
-        story.append(Paragraph(ex.question.replace("\n", "<br/>"), body))
+        story.append(Paragraph(_pdf_text(ex.question, keep_linebreaks=True), body))
         if ex.type == "mcq" and ex.choices:
             story.append(
                 ListFlowable(
-                    [ListItem(Paragraph(c, body)) for c in ex.choices],
+                    [ListItem(Paragraph(_pdf_text(c), body)) for c in ex.choices],
                     bulletType="bullet",
                 )
             )
@@ -98,11 +112,13 @@ def to_pdf(exam: ExamContent) -> bytes:
     story.append(Paragraph("Answer Key", h1))
     for i, ex in enumerate(exam.exercises, start=1):
         story.append(
-            Paragraph(f"<b>Exercise {i}:</b> {ex.answer}", body)
+            Paragraph(f"<b>Exercise {i}:</b> {_pdf_text(ex.answer)}", body)
         )
         if ex.explanation:
             story.append(
-                Paragraph(f"<i>Explanation:</i> {ex.explanation}", body)
+                Paragraph(
+                    f"<i>Explanation:</i> {_pdf_text(ex.explanation)}", body
+                )
             )
         story.append(Spacer(1, 0.2 * cm))
 

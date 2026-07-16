@@ -1,7 +1,9 @@
-import { ChevronDown, LogOut, Menu, X } from "lucide-react";
+import { ChevronDown, LogOut, Menu, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { useLanguage } from "../../contexts/LanguageContext";
-import { createT } from "../../lib/i18n";
+import { deleteMyData } from "../../lib/api";
+import { supabase } from "../../lib/supabase";
+import { createT, LANG_LABELS, type Lang } from "../../lib/i18n";
 import { UserInitialsAvatar } from "./UserInitialsAvatar";
 
 interface NavBarProps {
@@ -16,8 +18,21 @@ interface NavBarProps {
 export function NavBar({ user, currentPage, onNavigate, onLogout, extra, isAdmin }: NavBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const { lang, setLang } = useLanguage();
   const t = createT(lang);
+
+  async function handleDeleteData() {
+    const confirmed = window.confirm(t("acct_delete_confirm"));
+    if (!confirmed) return;
+    setDeleting(true);
+    try {
+      await deleteMyData();
+      await supabase.auth.signOut();
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const navLinks = [
     { id: "dashboard", label: t("nav_dashboard") },
@@ -97,10 +112,12 @@ export function NavBar({ user, currentPage, onNavigate, onLogout, extra, isAdmin
               gap: 2,
             }}
           >
-            {(["en", "fr"] as const).map((l) => (
+            {(["en", "fr", "ar"] as const).map((l: Lang) => (
               <button
                 key={l}
                 onClick={() => setLang(l)}
+                aria-pressed={lang === l}
+                aria-label={`Language: ${l.toUpperCase()}`}
                 style={{
                   fontSize: 12,
                   fontWeight: 600,
@@ -115,7 +132,7 @@ export function NavBar({ user, currentPage, onNavigate, onLogout, extra, isAdmin
                   letterSpacing: "0.02em",
                 }}
               >
-                {l.toUpperCase()}
+                {LANG_LABELS[l]}
               </button>
             ))}
           </div>
@@ -125,6 +142,9 @@ export function NavBar({ user, currentPage, onNavigate, onLogout, extra, isAdmin
             <div className="relative">
               <button
                 onClick={() => setProfileOpen(!profileOpen)}
+                aria-haspopup="menu"
+                aria-expanded={profileOpen}
+                aria-label="Account menu"
                 className="flex items-center gap-2 px-3 py-1.5 rounded-full hover:bg-[#cce7ff]/60 transition-colors"
               >
                 <UserInitialsAvatar name={user.name} size={32} />
@@ -165,6 +185,14 @@ export function NavBar({ user, currentPage, onNavigate, onLogout, extra, isAdmin
                     <LogOut size={14} color="#535862" />
                     <span style={{ fontFamily: "'Geist','Inter',sans-serif", fontSize: 14, fontWeight: 500, color: "#535862" }}>{t("nav_signout")}</span>
                   </button>
+                  <button
+                    onClick={() => { setProfileOpen(false); void handleDeleteData(); }}
+                    disabled={deleting}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-[#fdecec] transition-colors text-left"
+                  >
+                    <Trash2 size={14} color="#c0362c" />
+                    <span style={{ fontFamily: "'Geist','Inter',sans-serif", fontSize: 14, fontWeight: 500, color: "#c0362c" }}>{deleting ? t("acct_deleting") : t("acct_delete_data")}</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -190,6 +218,8 @@ export function NavBar({ user, currentPage, onNavigate, onLogout, extra, isAdmin
           {user && (
             <button
               onClick={() => setMenuOpen(!menuOpen)}
+              aria-label={menuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={menuOpen}
               className="md:hidden p-2 rounded-xl hover:bg-[#cce7ff]/60 transition-colors"
             >
               {menuOpen ? <X size={20} color="#0a0d12" /> : <Menu size={20} color="#0a0d12" />}

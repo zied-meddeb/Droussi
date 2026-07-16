@@ -50,3 +50,23 @@ git push
   Before your demo, open `<render-url>/health` once to warm it up.
 - OpenRouter `:free` models are rate-limited — fine for a live demo, not a crowd.
 - Supabase free projects pause after ~1 week idle (one click to resume).
+
+## Region, monitoring & scaling (production)
+- **Region:** `render.yaml` pins the API to `frankfurt` (EU) — close to the
+  primary French/Arabic audience and keeps data in the EU for GDPR. Keep the
+  Supabase project in the same region to minimise DB round-trip latency. Change
+  the `region` field if your audience is elsewhere.
+- **Monitoring/alerting:** the app logs structured warnings/errors at
+  `LOG_LEVEL` (default `INFO`). In the Render dashboard, add a **Log Stream**
+  drain and configure **Health Check** alerts on `/health`. Set up alerts on
+  repeated 5xx / rate-limit (429) spikes. *(Needs to be enabled in the
+  dashboard — not expressible in `render.yaml`.)*
+- **CDN / replication (evaluate):** the frontend is already served from Vercel's
+  global CDN. For the API, a single free instance is the current bottleneck;
+  before going wide, move exam generation to a durable queue + worker (see the
+  in-process job runner in `app/services/jobs.py`) and add a Supabase read
+  replica for distant users. *(Needs infra provisioning and load testing to
+  confirm.)*
+- **Rate limiting:** the API applies per-client limits in-process
+  (`app/rate_limit.py`). This is per-instance; if you scale to multiple
+  instances, back it with Render Key Value (Redis) so limits are shared.

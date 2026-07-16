@@ -82,13 +82,31 @@ class TestGenerate:
         r = client.post("/api/exams/exam1/generate", json=body)
         assert r.status_code == 400
 
+    def test_foreign_exam_returns_404(self, client, monkeypatch):
+        # Exam id the caller does not own: ownership pre-check must reject it
+        # before any documents are loaded or generation is attempted.
+        _patch_sb(monkeypatch, FakeSupabase(tables={"exams": [FakeResp(None)]}))
+        r = client.post("/api/exams/exam1/generate", json={"document_id": "doc1", "spec": SPEC})
+        assert r.status_code == 404
+
     def test_documents_not_found_404(self, client, monkeypatch):
-        _patch_sb(monkeypatch, FakeSupabase(tables={"documents": [FakeResp([])]}))
+        sb = FakeSupabase(
+            tables={
+                "exams": [FakeResp({"id": "exam1"})],
+                "documents": [FakeResp([])],
+            }
+        )
+        _patch_sb(monkeypatch, sb)
         r = client.post("/api/exams/exam1/generate", json={"document_id": "doc1", "spec": SPEC})
         assert r.status_code == 404
 
     def test_no_extracted_text_422(self, client, monkeypatch):
-        sb = FakeSupabase(tables={"documents": [FakeResp([{"id": "doc1", "extracted_text": "  "}])]})
+        sb = FakeSupabase(
+            tables={
+                "exams": [FakeResp({"id": "exam1"})],
+                "documents": [FakeResp([{"id": "doc1", "extracted_text": "  "}])],
+            }
+        )
         _patch_sb(monkeypatch, sb)
         r = client.post("/api/exams/exam1/generate", json={"document_id": "doc1", "spec": SPEC})
         assert r.status_code == 422
@@ -97,7 +115,7 @@ class TestGenerate:
         sb = FakeSupabase(
             tables={
                 "documents": [FakeResp([{"id": "doc1", "extracted_text": "course text"}])],
-                "exams": [FakeResp(None), FakeResp([EXAM_READY])],
+                "exams": [FakeResp({"id": "exam1"}), FakeResp(None), FakeResp([EXAM_READY])],
             }
         )
         _patch_sb(monkeypatch, sb)
@@ -110,7 +128,7 @@ class TestGenerate:
         sb = FakeSupabase(
             tables={
                 "documents": [FakeResp([{"id": "doc1", "extracted_text": "course text"}])],
-                "exams": [FakeResp(None), FakeResp(None)],
+                "exams": [FakeResp({"id": "exam1"}), FakeResp(None), FakeResp(None)],
             }
         )
         _patch_sb(monkeypatch, sb)
@@ -126,7 +144,7 @@ class TestGenerate:
         sb = FakeSupabase(
             tables={
                 "documents": [FakeResp([{"id": "doc1", "extracted_text": "course text"}])],
-                "exams": [FakeResp(None), FakeResp(None)],
+                "exams": [FakeResp({"id": "exam1"}), FakeResp(None), FakeResp(None)],
             }
         )
         _patch_sb(monkeypatch, sb)
@@ -137,6 +155,57 @@ class TestGenerate:
         self._stub_generate(monkeypatch, boom)
         r = client.post("/api/exams/exam1/generate", json={"document_id": "doc1", "spec": SPEC})
         assert r.status_code == 502
+
+
+class TestGenerateAsync:
+    @pytest.fixture(autouse=True)
+    def _no_quota_check(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.routers.exams.usage_service.ensure_can_generate_exam",
+            lambda *_a, **_k: None,
+        )
+
+    def test_foreign_exam_returns_404(self, client, monkeypatch):
+        _patch_sb(monkeypatch, FakeSupabase(tables={"exams": [FakeResp(None)]}))
+        r = client.post(
+            "/api/exams/exam1/generate-async",
+            json={"document_id": "doc1", "spec": SPEC},
+        )
+        assert r.status_code == 404
+
+    def test_accepts_and_returns_generating(self, client, monkeypatch):
+        # Prevent the spawned job from actually running during the test.
+        monkeypatch.setattr("app.routers.exams.jobs.spawn", lambda coro: coro.close())
+        sb = FakeSupabase(
+            tables={
+                "exams": [
+                    FakeResp({"id": "exam1"}),  # ownership check
+                    FakeResp(None),             # set generating
+                    FakeResp({**EXAM_PENDING, "status": "generating"}),  # read-back
+                ],
+                "documents": [FakeResp([{"id": "doc1", "extracted_text": "course text"}])],
+            }
+        )
+        _patch_sb(monkeypatch, sb)
+        r = client.post(
+            "/api/exams/exam1/generate-async",
+            json={"document_id": "doc1", "spec": SPEC},
+        )
+        assert r.status_code == 202
+        assert r.json()["status"] == "generating"
+
+
+class TestGetExam:
+    def test_not_found_404(self, client, monkeypatch):
+        _patch_sb(monkeypatch, FakeSupabase(tables={"exams": [FakeResp(None)]}))
+        r = client.get("/api/exams/exam1")
+        assert r.status_code == 404
+
+    def test_returns_exam(self, client, monkeypatch):
+        _patch_sb(monkeypatch, FakeSupabase(tables={"exams": [FakeResp(EXAM_READY)]}))
+        r = client.get("/api/exams/exam1")
+        assert r.status_code == 200
+        assert r.json()["status"] == "ready"
 
 
 class TestUpdateContent:

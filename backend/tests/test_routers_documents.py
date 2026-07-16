@@ -45,6 +45,26 @@ class TestRegisterDocument:
         )
         assert r.status_code == 403
 
+    @pytest.mark.parametrize(
+        "bad_path",
+        [
+            "user123/../someone-else/secret.pdf",  # traversal to a sibling folder
+            "user123/../../etc/passwd",            # traversal above the bucket root
+            "/user123/notes.txt",                  # absolute path
+            "user123\\notes.txt",                  # windows separator
+            "user123",                             # no object segment, folder only
+            "user1234/notes.txt",                  # prefix collision, not the real id
+        ],
+    )
+    def test_rejects_path_traversal(self, client, monkeypatch, bad_path):
+        # A malicious path is rejected before any (RLS-bypassing) download runs.
+        _patch_sb(monkeypatch, FakeSupabase(download=b"should-not-be-read"))
+        r = client.post(
+            "/api/documents/register",
+            json=_register_body(storage_path=bad_path),
+        )
+        assert r.status_code == 403
+
     def test_download_failure_returns_400(self, client, monkeypatch):
         sb = FakeSupabase(download=RuntimeError("no such object"))
         _patch_sb(monkeypatch, sb)
@@ -59,6 +79,22 @@ class TestRegisterDocument:
             json=_register_body(mime_type="application/pdf"),
         )
         assert r.status_code == 422
+
+    def test_rejects_unsupported_mime_type(self, client, monkeypatch):
+        _patch_sb(monkeypatch, FakeSupabase(download=b"data"))
+        r = client.post(
+            "/api/documents/register",
+            json=_register_body(mime_type="image/png"),
+        )
+        assert r.status_code == 415
+
+    def test_rejects_oversized_declared_size(self, client, monkeypatch):
+        _patch_sb(monkeypatch, FakeSupabase(download=b"data"))
+        r = client.post(
+            "/api/documents/register",
+            json=_register_body(size_bytes=100 * 1024 * 1024),
+        )
+        assert r.status_code == 413
 
     def test_insert_failure_returns_500(self, client, monkeypatch):
         sb = FakeSupabase(tables={"documents": [FakeResp([])]}, download=b"hello world")

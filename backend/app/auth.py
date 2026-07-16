@@ -1,13 +1,23 @@
+import json
+import logging
+import time
+
 from fastapi import HTTPException, Request, status
 from pydantic import BaseModel
 import jwt
 from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 import httpx
-import json
 
 from .config import get_settings
 
+logger = logging.getLogger(__name__)
+
+# Cache the JWKS but refresh it periodically so Supabase key rotation is picked
+# up without a restart. A kid miss still forces an immediate refresh (see
+# _public_key_and_alg).
+_JWKS_TTL_SECONDS = 3600
 _jwks_cache: list[dict] = []
+_jwks_fetched_at: float = 0.0
 
 
 class CurrentUser(BaseModel):
@@ -16,13 +26,15 @@ class CurrentUser(BaseModel):
 
 
 def _load_jwks(force: bool = False) -> list[dict]:
-    global _jwks_cache
-    if _jwks_cache and not force:
+    global _jwks_cache, _jwks_fetched_at
+    is_fresh = (time.monotonic() - _jwks_fetched_at) < _JWKS_TTL_SECONDS
+    if _jwks_cache and is_fresh and not force:
         return _jwks_cache
     url = f"{get_settings().supabase_url}/auth/v1/.well-known/jwks.json"
     resp = httpx.get(url, timeout=10)
     resp.raise_for_status()
     _jwks_cache = resp.json().get("keys", [])
+    _jwks_fetched_at = time.monotonic()
     return _jwks_cache
 
 
@@ -63,18 +75,23 @@ def get_current_user(request: Request) -> CurrentUser:
         # and signature are verified below against the trusted JWKS key.
         kid = jwt.get_unverified_header(token).get("kid")
         public_key, alg = _public_key_and_alg(kid)
+        settings = get_settings()
         payload = jwt.decode(
             token,
             public_key,
             algorithms=[alg],
-            options={"verify_aud": False},
+            audience=settings.supabase_jwt_aud,
+            issuer=settings.supabase_jwt_issuer,
+            options={"verify_aud": True, "verify_iss": True, "require": ["exp"]},
         )
         user_id = payload.get("sub")
         if not user_id:
             raise ValueError("No sub claim in token")
     except Exception as e:
+        # Log the underlying reason server-side; never leak it to the client.
+        logger.warning("JWT validation failed: %s", e)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token: {e}",
+            detail="Invalid or expired authentication token.",
         ) from e
     return CurrentUser(id=user_id, email=payload.get("email"))

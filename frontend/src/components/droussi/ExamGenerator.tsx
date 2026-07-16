@@ -65,7 +65,19 @@ function QuestionCard({ q, index }: { q: Question; index: number }) {
 
   return (
     <div style={{ backgroundColor: "#fafdff", borderRadius: 20, border: "1px solid rgba(83,88,98,0.12)", overflow: "hidden", marginBottom: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", cursor: "pointer" }} onClick={() => setExpanded(!expanded)}>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setExpanded(!expanded);
+          }
+        }}
+        style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", cursor: "pointer" }}
+      >
         <span style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: "#f6f7f8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#535862", flexShrink: 0 }}>
           {index + 1}
         </span>

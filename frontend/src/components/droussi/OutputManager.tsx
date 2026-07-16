@@ -53,7 +53,7 @@ function PreviewModal({ exam, onClose, t }: { exam: ExamOutput; onClose: () => v
                 <span style={{ fontSize: 13, color: "rgba(255,255,255,0.8)", display: "flex", alignItems: "center", gap: 4 }}><Sparkles size={12} />{exam.totalMarks} pts</span>
               </div>
             </div>
-            <button onClick={onClose} style={{ backgroundColor: "rgba(255,255,255,0.15)", border: "none", borderRadius: "50%", width: 32, height: 32, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <button onClick={onClose} aria-label="Close preview" style={{ backgroundColor: "rgba(255,255,255,0.15)", border: "none", borderRadius: "50%", width: 32, height: 32, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <X size={16} color="#fff" />
             </button>
           </div>

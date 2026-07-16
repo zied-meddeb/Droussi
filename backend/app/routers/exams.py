@@ -1,23 +1,89 @@
 import asyncio
+import logging
 import uuid
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 
 from ..auth import CurrentUser, get_current_user
 from ..config import Settings, get_settings
 from ..db import get_supabase
+from ..rate_limit import limiter
 from ..models.schemas import (
     ExamContent,
     ExamOut,
     GenerateExamRequest,
     UpdateExamContentRequest,
 )
-from ..services import exam_generator, exporter
+from ..services import exam_generator, exporter, jobs
 from ..services import usage as usage_service
+from ..models.schemas import ExamSpec
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/exams", tags=["exams"])
+
+
+async def _mark_exam_error(sb, exam_id: str, user_id: str) -> None:
+    """Set an exam to the error state, scoped to its owner, off the event loop."""
+    await run_in_threadpool(
+        lambda: sb.table("exams")
+        .update({"status": "error"})
+        .eq("id", exam_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+
+async def _run_generation_job(
+    sb,
+    settings: Settings,
+    *,
+    user_id: str,
+    exam_id: str,
+    spec: ExamSpec,
+    course_text: str,
+) -> None:
+    """Background body for asynchronous generation: produce the exam, render the
+    export, and persist a ready row. On any failure the exam is marked 'error'.
+    Never raises — it runs detached from the request, so the outcome lives only
+    in the exam row's status."""
+    try:
+        content = await asyncio.wait_for(
+            exam_generator.generate_exam(
+                user_id=user_id, spec=spec, course_text=course_text
+            ),
+            timeout=180,
+        )
+        export_path = await run_in_threadpool(
+            _render_and_upload,
+            sb,
+            settings,
+            user_id=user_id,
+            exam_id=exam_id,
+            content=content,
+            export_format=spec.export_format,
+        )
+        await run_in_threadpool(
+            lambda: sb.table("exams")
+            .update(
+                {
+                    "title": content.title,
+                    "content": content.model_dump(),
+                    "export_format": spec.export_format,
+                    "export_path": export_path,
+                    "status": "ready",
+                }
+            )
+            .eq("id", exam_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+    except Exception:
+        logger.exception("Async exam generation failed for exam %s", exam_id)
+        await _mark_exam_error(sb, exam_id, user_id)
 
 
 def _render_and_upload(
@@ -59,7 +125,8 @@ def _render_and_upload(
             {"content-type": content_type, "x-upsert": "true"},
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Export upload failed: {e}") from e
+        logger.exception("Export upload failed for %s", export_path)
+        raise HTTPException(status_code=500, detail="Export upload failed.") from e
     return export_path
 
 
@@ -117,31 +184,43 @@ def create_draft(
     return ExamOut.model_validate(inserted.data[0])
 
 
-@router.post(
-    "/{exam_id}/generate",
-    responses={
-        400: {"description": "Too many documents requested"},
-        404: {"description": "Documents not found"},
-        422: {"description": "Documents have no extracted text"},
-        500: {"description": "Export upload or database update failed"},
-        502: {"description": "Exam generation failed"},
-        504: {"description": "Exam generation timed out"},
-    },
-)
-async def generate(
-    exam_id: str,
-    body: GenerateExamRequest,
-    user: Annotated[CurrentUser, Depends(get_current_user)],
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> ExamOut:
-    sb = get_supabase()
+async def _prepare_generation(
+    sb, *, exam_id: str, body: GenerateExamRequest, user: CurrentUser
+) -> str:
+    """Validate ownership, quota, and documents, then mark the exam
+    'generating'. Returns the concatenated course text. Raises HTTPException on
+    any precondition failure. Shared by the sync and async generate endpoints.
 
+    The Supabase client is synchronous, so every call is offloaded to a
+    threadpool to keep the event loop free.
+    """
     ids = list(dict.fromkeys(body.document_ids or [body.document_id]))
     if len(ids) > 5:
         raise HTTPException(status_code=400, detail="Maximum 5 documents per exam.")
 
-    docs = (
-        sb.table("documents")
+    # Verify the exam belongs to the caller before doing any expensive work.
+    # The service-role client bypasses RLS, so without this an attacker could
+    # target another user's exam id and (via the failure paths below) flip its
+    # status, as well as burn OpenRouter budget/quota on a foreign exam.
+    owned = await run_in_threadpool(
+        lambda: sb.table("exams")
+        .select("id")
+        .eq("id", exam_id)
+        .eq("user_id", user.id)
+        .maybe_single()
+        .execute()
+    )
+    if not owned or not owned.data:
+        raise HTTPException(status_code=404, detail="Exam not found")
+
+    # Short-circuit on quota / global budget before loading documents or calling
+    # the LLM, so a user who is already over the limit can't force expensive work.
+    await run_in_threadpool(
+        usage_service.ensure_can_generate_exam, user.id, user.email
+    )
+
+    docs = await run_in_threadpool(
+        lambda: sb.table("documents")
         .select("id, extracted_text")
         .in_("id", ids)
         .eq("user_id", user.id)
@@ -160,13 +239,116 @@ async def generate(
             status_code=422,
             detail="Documents have no extracted text — cannot generate exam.",
         )
-    course_text = "\n\n---\n\n".join(texts)
 
-    sb.table("exams").update(
-        {"spec": body.spec.model_dump(), "status": "generating"}
-    ).eq("id", exam_id).eq("user_id", user.id).execute()
+    await run_in_threadpool(
+        lambda: sb.table("exams")
+        .update({"spec": body.spec.model_dump(), "status": "generating"})
+        .eq("id", exam_id)
+        .eq("user_id", user.id)
+        .execute()
+    )
+    return "\n\n---\n\n".join(texts)
 
-    usage_service.ensure_can_generate_exam(user.id, user.email)
+
+@router.post(
+    "/{exam_id}/generate-async",
+    status_code=202,
+    responses={
+        400: {"description": "Too many documents requested"},
+        404: {"description": "Exam or documents not found"},
+        422: {"description": "Documents have no extracted text"},
+        429: {"description": "Daily quota reached"},
+        503: {"description": "Shared daily budget exhausted"},
+    },
+)
+@limiter.limit("10/minute")
+async def generate_async(
+    request: Request,
+    exam_id: str,
+    body: GenerateExamRequest,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ExamOut:
+    """Kick off generation in the background and return immediately with the
+    exam in the 'generating' state. Clients poll ``GET /api/exams/{exam_id}``
+    until the status becomes 'ready' or 'error'. This decouples the long LLM
+    call from the HTTP request lifecycle (no multi-minute request holds)."""
+    sb = get_supabase()
+    course_text = await _prepare_generation(
+        sb, exam_id=exam_id, body=body, user=user
+    )
+
+    jobs.spawn(
+        _run_generation_job(
+            sb,
+            settings,
+            user_id=user.id,
+            exam_id=exam_id,
+            spec=body.spec,
+            course_text=course_text,
+        )
+    )
+
+    row = await run_in_threadpool(
+        lambda: sb.table("exams")
+        .select("*")
+        .eq("id", exam_id)
+        .eq("user_id", user.id)
+        .maybe_single()
+        .execute()
+    )
+    if not row or not row.data:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    return ExamOut.model_validate(row.data)
+
+
+@router.get(
+    "/{exam_id}",
+    responses={404: {"description": "Exam not found"}},
+)
+async def get_exam(
+    exam_id: str,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> ExamOut:
+    """Return the current state of an exam (status + content once ready). Used
+    to poll the progress of an asynchronous generation."""
+    sb = get_supabase()
+    row = await run_in_threadpool(
+        lambda: sb.table("exams")
+        .select("*")
+        .eq("id", exam_id)
+        .eq("user_id", user.id)
+        .maybe_single()
+        .execute()
+    )
+    if not row or not row.data:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    return ExamOut.model_validate(row.data)
+
+
+@router.post(
+    "/{exam_id}/generate",
+    responses={
+        400: {"description": "Too many documents requested"},
+        404: {"description": "Documents not found"},
+        422: {"description": "Documents have no extracted text"},
+        500: {"description": "Export upload or database update failed"},
+        502: {"description": "Exam generation failed"},
+        504: {"description": "Exam generation timed out"},
+    },
+)
+@limiter.limit("10/minute")
+async def generate(
+    request: Request,
+    exam_id: str,
+    body: GenerateExamRequest,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ExamOut:
+    sb = get_supabase()
+    course_text = await _prepare_generation(
+        sb, exam_id=exam_id, body=body, user=user
+    )
 
     try:
         content = await asyncio.wait_for(
@@ -178,7 +360,7 @@ async def generate(
             timeout=180,
         )
     except TimeoutError as e:
-        sb.table("exams").update({"status": "error"}).eq("id", exam_id).execute()
+        await _mark_exam_error(sb, exam_id, user.id)
         raise HTTPException(
             status_code=504,
             detail=(
@@ -187,10 +369,14 @@ async def generate(
             ),
         ) from e
     except Exception as e:
-        sb.table("exams").update({"status": "error"}).eq("id", exam_id).execute()
-        raise HTTPException(status_code=502, detail=f"Generation failed: {e}") from e
+        await _mark_exam_error(sb, exam_id, user.id)
+        logger.exception("Exam generation failed for exam %s", exam_id)
+        raise HTTPException(
+            status_code=502, detail="Exam generation failed."
+        ) from e
 
-    export_path = _render_and_upload(
+    export_path = await run_in_threadpool(
+        _render_and_upload,
         sb,
         settings,
         user_id=user.id,
@@ -199,8 +385,8 @@ async def generate(
         export_format=body.spec.export_format,
     )
 
-    updated = (
-        sb.table("exams")
+    updated = await run_in_threadpool(
+        lambda: sb.table("exams")
         .update(
             {
                 "title": content.title,

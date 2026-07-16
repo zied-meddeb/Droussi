@@ -4,7 +4,12 @@ import json
 import pytest
 
 from app.services import exam_generator
-from app.services.exam_generator import _extract_json, _fix_points, generate_exam
+from app.services.exam_generator import (
+    _chat_with_backoff,
+    _extract_json,
+    _fix_points,
+    generate_exam,
+)
 from app.services.llm import ChatResult
 
 from .conftest import make_content, make_exercise, make_spec
@@ -24,6 +29,11 @@ VALID_EXAM_JSON = json.dumps(
 
 def _chat_result(content: str) -> ChatResult:
     return ChatResult(content=content, prompt_tokens=1, completion_tokens=1, total_tokens=2, cost_usd=0.001)
+
+
+async def _instant_sleep(_seconds):
+    """Patch asyncio.sleep so backoff tests don't actually wait."""
+    return None
 
 
 @pytest.fixture
@@ -95,6 +105,33 @@ class TestFixPoints:
         fixed = _fix_points(content, spec)
         assert len(fixed.exercises) == 1
         assert fixed.exercises[0].points == 2
+
+
+class TestChatWithBackoff:
+    async def test_retries_transient_runtime_error_then_succeeds(self, monkeypatch):
+        monkeypatch.setattr(exam_generator.asyncio, "sleep", _instant_sleep)
+        calls = {"n": 0}
+
+        async def flaky(*_a, **_k):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("all models rate-limited")
+            return _chat_result(VALID_EXAM_JSON)
+
+        monkeypatch.setattr("app.services.exam_generator.llm.chat", flaky)
+        result = await _chat_with_backoff([{"role": "user", "content": "x"}])
+        assert result.content == VALID_EXAM_JSON
+        assert calls["n"] == 2
+
+    async def test_gives_up_after_max_attempts(self, monkeypatch):
+        monkeypatch.setattr(exam_generator.asyncio, "sleep", _instant_sleep)
+
+        async def always_fail(*_a, **_k):
+            raise RuntimeError("still failing")
+
+        monkeypatch.setattr("app.services.exam_generator.llm.chat", always_fail)
+        with pytest.raises(RuntimeError):
+            await _chat_with_backoff([{"role": "user", "content": "x"}])
 
 
 class TestGenerateExam:

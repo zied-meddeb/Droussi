@@ -3,6 +3,9 @@ services:
     name: exam-generator-api
     runtime: python
     plan: free
+    # Deploy close to the primary (EU / North Africa) user base to cut latency
+    # and keep data in the EU for GDPR. Change if your audience shifts.
+    region: frankfurt
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -10,6 +13,9 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.12"
+      # Logging verbosity for the app's structured logs (used for monitoring).
+      - key: LOG_LEVEL
+        value: INFO
       # --- Secrets: set these in the Render dashboard (sync:false = not in git) ---
       - key: SUPABASE_URL
         sync: false

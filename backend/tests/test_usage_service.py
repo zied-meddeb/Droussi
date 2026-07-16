@@ -87,19 +87,34 @@ class TestEnsureCanGenerate:
 
 class TestRecording:
     def test_record_exam_increments(self, monkeypatch):
-        sb = FakeSupabase(
-            tables={
-                "app_users": [FakeResp(None)],
-                "user_daily_usage": [FakeResp({"exam_count": 1, "cost_usd": 0.0}), FakeResp(None)],
-            }
-        )
+        sb = FakeSupabase(tables={"app_users": [FakeResp(None)]})
         _patch(monkeypatch, sb)
-        usage_service.record_exam("user123", 0.01)  # no raise
+        usage_service.record_exam("user123", 0.01)
+        # The increment must go through the atomic RPC, not a read-modify-write.
+        assert sb.rpc_calls == [
+            (
+                "increment_daily_usage",
+                {"p_user_id": "user123", "p_exams": 1, "p_cost": 0.01},
+            )
+        ]
+
+    def test_record_cost_increments_cost_only(self, monkeypatch):
+        sb = FakeSupabase(tables={"app_users": [FakeResp(None)]})
+        _patch(monkeypatch, sb)
+        usage_service.record_cost("user123", 0.02)
+        assert sb.rpc_calls == [
+            (
+                "increment_daily_usage",
+                {"p_user_id": "user123", "p_exams": 0, "p_cost": 0.02},
+            )
+        ]
 
     def test_record_cost_ignores_zero(self, monkeypatch):
         # Zero cost returns early — no Supabase interaction needed.
-        _patch(monkeypatch, FakeSupabase())
+        sb = FakeSupabase()
+        _patch(monkeypatch, sb)
         usage_service.record_cost("user123", 0.0)
+        assert sb.rpc_calls == []
 
 
 class TestAdminAggregation:

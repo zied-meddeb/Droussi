@@ -1,4 +1,18 @@
-export type Lang = "en" | "fr";
+export type Lang = "en" | "fr" | "ar";
+
+// Languages that render right-to-left. Used to set <html dir> and to flip
+// direction-aware layout.
+export const RTL_LANGS: readonly Lang[] = ["ar"] as const;
+
+export function isRtl(lang: Lang): boolean {
+  return RTL_LANGS.includes(lang);
+}
+
+export const LANG_LABELS: Record<Lang, string> = {
+  en: "EN",
+  fr: "FR",
+  ar: "ع",
+};
 
 export const translations = {
   en: {
@@ -9,6 +23,10 @@ export const translations = {
     nav_repository: "Repository",
     nav_outputs: "My Outputs",
     nav_signout: "Sign out",
+    acct_delete_data: "Delete my data",
+    acct_deleting: "Deleting…",
+    acct_delete_confirm:
+      "Permanently delete all your documents, exams, and usage history? This cannot be undone.",
 
     // Dashboard
     dash_good_morning: "Good morning",
@@ -126,6 +144,10 @@ export const translations = {
     nav_repository: "Référentiel",
     nav_outputs: "Mes sorties",
     nav_signout: "Se déconnecter",
+    acct_delete_data: "Supprimer mes données",
+    acct_deleting: "Suppression…",
+    acct_delete_confirm:
+      "Supprimer définitivement tous vos documents, examens et votre historique d'utilisation ? Cette action est irréversible.",
 
     // Dashboard
     dash_good_morning: "Bonjour",
@@ -234,6 +256,127 @@ export const translations = {
     out_preview_label: "Aperçu de l'examen",
     out_download_pdf: "Télécharger PDF",
     out_download_docx: "Télécharger DOCX",
+  },
+  ar: {
+    // Nav
+    nav_dashboard: "لوحة التحكم",
+    nav_upload: "رفع",
+    nav_exam: "منشئ الاختبارات",
+    nav_repository: "المستودع",
+    nav_outputs: "مخرجاتي",
+    nav_signout: "تسجيل الخروج",
+    acct_delete_data: "حذف بياناتي",
+    acct_deleting: "جارٍ الحذف…",
+    acct_delete_confirm:
+      "هل تريد حذف جميع مستنداتك واختباراتك وسجل الاستخدام نهائياً؟ لا يمكن التراجع عن هذا الإجراء.",
+
+    // Dashboard
+    dash_good_morning: "صباح الخير",
+    dash_good_afternoon: "مساء الخير",
+    dash_good_evening: "مساء الخير",
+    dash_uploads: "المواد المرفوعة",
+    dash_exams: "الاختبارات المُنشأة",
+    dash_downloads: "التنزيلات",
+    dash_quick_actions: "إجراءات سريعة",
+    dash_recent_activity: "النشاط الأخير",
+    dash_view_all: "عرض الكل ←",
+    dash_no_activity: "لا يوجد نشاط حديث بعد",
+    dash_upload_title: "رفع مادة",
+    dash_upload_desc: "ارفع شرائح الدروس أو الملاحظات أو تسجيلات المحاضرات",
+    dash_exam_title: "إنشاء اختبار",
+    dash_exam_desc: "أنشئ اختبارات بالذكاء الاصطناعي من موادك المرفوعة",
+    dash_repo_title: "المستودع",
+    dash_repo_desc: "تصفّح وأعد استخدام موادك الدراسية المرفوعة",
+    dash_outputs_title: "مخرجاتي",
+    dash_outputs_desc: "اعرض أو نزّل أو حوّل اختباراتك المُنشأة",
+
+    // Upload
+    up_title: "رفع المواد",
+    up_desc: "ارفع دروس أو ملاحظات PDF، صنّفها حسب المادة، ثم أنشئ الاختبارات",
+    up_material_details: "تفاصيل المادة",
+    up_subject: "المادة",
+    up_subject_placeholder: "اختر مادة…",
+    up_tags: "الوسوم",
+    up_tags_optional: "(اختياري)",
+    up_tags_placeholder: "مثال: الفصل ٣، منتصف الفصل…",
+    up_tags_add: "إضافة أخرى…",
+    up_drop_ready: "أفلت ملفات PDF هنا أو انقر للتصفّح",
+    up_drop_disabled: "اختر مادة أولاً",
+    up_drop_hint: "PDF فقط — حتى ٢٠ ميغابايت لكل ملف تقريباً",
+    up_no_materials: "لا توجد مواد بعد",
+    up_no_materials_hint: "اختر مادة أعلاه، ثم ارفع أول ملف PDF",
+    up_loading: "جارٍ تحميل موادك…",
+    up_error_subject: "اختر مادة قبل الرفع.",
+    up_go_exam: "إنشاء اختبار من الملفات المرفوعة",
+
+    // Exam Generator
+    eg_title: "منشئ الاختبارات",
+    eg_desc: "اضبط اختبارك ودع الذكاء الاصطناعي يُنشئ الأسئلة من موادك",
+    eg_source: "المواد المصدرية",
+    eg_no_files: "لم تُرفع أي ملفات بعد. اذهب إلى رفع لإضافة المواد.",
+    eg_max_materials: "يمكن اختيار ٥ مواد كحد أقصى.",
+    eg_settings: "إعدادات الاختبار",
+    eg_exam_title: "عنوان الاختبار",
+    eg_duration: "المدة (بالدقائق)",
+    eg_difficulty: "الصعوبة",
+    eg_easy: "سهل",
+    eg_medium: "متوسط",
+    eg_hard: "صعب",
+    eg_language: "لغة الاختبار",
+    eg_lang_en: "الإنجليزية",
+    eg_lang_fr: "الفرنسية",
+    eg_mcq: "اختيار من متعدد",
+    eg_short: "قصير",
+    eg_essay: "مقالي",
+    eg_count: "عدد الأسئلة",
+    eg_grading: "التقييم",
+    eg_grading_hint: "حدّد الدرجات الممنوحة لكل نوع سؤال",
+    eg_marks_per_mcq: "درجات / اختيار متعدد",
+    eg_marks_per_short: "درجات / قصير",
+    eg_marks_per_essay: "درجات / مقالي",
+    eg_total_marks: "مجموع الدرجات",
+    eg_generate: "إنشاء الاختبار",
+    eg_generating: "جارٍ إنشاء الاختبار…",
+    eg_limit: "تم بلوغ الحد اليومي",
+    eg_empty_title: "لم يُنشأ أي اختبار بعد",
+    eg_empty_hint: "اضبط الإعدادات وانقر على إنشاء الاختبار",
+    eg_generated_label: "الاختبار المُنشأ",
+    eg_ai_loading: "جارٍ إنشاء اختبارك…",
+    eg_ai_subtext: "يقوم الذكاء الاصطناعي بتحليل موادك وصياغة الأسئلة",
+    eg_open_full: "فتح العرض الكامل",
+    eg_min: "دقيقة",
+    eg_questions: "أسئلة",
+    eg_marks: "درجات",
+
+    // Repository
+    repo_title: "المستودع",
+    repo_desc: "تصفّح موادك المرفوعة وأعد إنشاء الاختبارات في أي وقت",
+    repo_search: "ابحث في الملفات والمواد والوسوم…",
+    repo_files: "ملفات",
+    repo_exams_generated: "اختبارات مُنشأة",
+    repo_no_files: "لم يُعثر على ملفات",
+    repo_no_files_hint: "حاول تعديل البحث أو التصفية",
+    repo_no_exams: "لا توجد اختبارات بعد",
+    repo_generate: "إنشاء",
+
+    // Outputs
+    out_title: "مخرجاتي",
+    out_desc: "اعرض وعاين ونزّل جميع اختباراتك المُنشأة",
+    out_search: "ابحث في الاختبارات…",
+    out_all_formats: "كل الصيغ",
+    out_no_exams: "لم يُعثر على اختبارات",
+    out_th_exam: "الاختبار",
+    out_th_subject: "المادة",
+    out_th_duration: "المدة",
+    out_th_marks: "الدرجات",
+    out_th_created: "أُنشئ في",
+    out_th_actions: "إجراءات",
+    out_exams: "اختبارات",
+    out_pdfs: "ملفات PDF متاحة",
+    out_docx: "ملفات DOCX متاحة",
+    out_preview_label: "معاينة الاختبار",
+    out_download_pdf: "تنزيل PDF",
+    out_download_docx: "تنزيل DOCX",
   },
 } as const;
 

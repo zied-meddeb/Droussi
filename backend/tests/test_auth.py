@@ -1,5 +1,6 @@
 """Tests for JWT authentication, including a real ES256-signed token."""
 import json
+import time
 
 import jwt
 import pytest
@@ -9,6 +10,10 @@ from jwt.algorithms import ECAlgorithm
 
 from app import auth
 from app.auth import get_current_user
+
+# Must match conftest's SUPABASE_URL / expected audience.
+TEST_ISS = "https://test.supabase.co/auth/v1"
+TEST_AUD = "authenticated"
 
 
 class FakeRequest:
@@ -22,6 +27,19 @@ def _make_key_and_jwk(kid="test-kid"):
     jwk["alg"] = "ES256"
     jwk["kid"] = kid
     return private_key, jwk
+
+
+def _claims(**over):
+    """Base claims for a valid Supabase user token (aud/iss/exp present)."""
+    base = {
+        "sub": "user123",
+        "email": "user@test.com",
+        "aud": TEST_AUD,
+        "iss": TEST_ISS,
+        "exp": int(time.time()) + 3600,
+    }
+    base.update(over)
+    return base
 
 
 class TestMissingOrBadToken:
@@ -46,7 +64,7 @@ class TestValidToken:
         private_key, jwk = _make_key_and_jwk()
         monkeypatch.setattr(auth, "_load_jwks", lambda force=False: [jwk])
         token = jwt.encode(
-            {"sub": "user123", "email": "user@test.com"},
+            _claims(),
             private_key,
             algorithm="ES256",
             headers={"kid": "test-kid"},
@@ -58,8 +76,49 @@ class TestValidToken:
     def test_token_without_sub_is_rejected(self, monkeypatch):
         private_key, jwk = _make_key_and_jwk()
         monkeypatch.setattr(auth, "_load_jwks", lambda force=False: [jwk])
+        claims = _claims()
+        claims.pop("sub")
         token = jwt.encode(
-            {"email": "user@test.com"}, private_key, algorithm="ES256", headers={"kid": "test-kid"}
+            claims, private_key, algorithm="ES256", headers={"kid": "test-kid"}
+        )
+        with pytest.raises(HTTPException) as exc:
+            get_current_user(FakeRequest({"Authorization": f"Bearer {token}"}))
+        assert exc.value.status_code == 401
+
+    def test_wrong_audience_is_rejected(self, monkeypatch):
+        private_key, jwk = _make_key_and_jwk()
+        monkeypatch.setattr(auth, "_load_jwks", lambda force=False: [jwk])
+        token = jwt.encode(
+            _claims(aud="some-other-service"),
+            private_key,
+            algorithm="ES256",
+            headers={"kid": "test-kid"},
+        )
+        with pytest.raises(HTTPException) as exc:
+            get_current_user(FakeRequest({"Authorization": f"Bearer {token}"}))
+        assert exc.value.status_code == 401
+
+    def test_wrong_issuer_is_rejected(self, monkeypatch):
+        private_key, jwk = _make_key_and_jwk()
+        monkeypatch.setattr(auth, "_load_jwks", lambda force=False: [jwk])
+        token = jwt.encode(
+            _claims(iss="https://evil.example/auth/v1"),
+            private_key,
+            algorithm="ES256",
+            headers={"kid": "test-kid"},
+        )
+        with pytest.raises(HTTPException) as exc:
+            get_current_user(FakeRequest({"Authorization": f"Bearer {token}"}))
+        assert exc.value.status_code == 401
+
+    def test_expired_token_is_rejected(self, monkeypatch):
+        private_key, jwk = _make_key_and_jwk()
+        monkeypatch.setattr(auth, "_load_jwks", lambda force=False: [jwk])
+        token = jwt.encode(
+            _claims(exp=int(time.time()) - 10),
+            private_key,
+            algorithm="ES256",
+            headers={"kid": "test-kid"},
         )
         with pytest.raises(HTTPException) as exc:
             get_current_user(FakeRequest({"Authorization": f"Bearer {token}"}))
@@ -68,7 +127,7 @@ class TestValidToken:
     def test_no_keys_in_jwks_is_rejected(self, monkeypatch):
         private_key, _ = _make_key_and_jwk()
         monkeypatch.setattr(auth, "_load_jwks", lambda force=False: [])
-        token = jwt.encode({"sub": "user123"}, private_key, algorithm="ES256")
+        token = jwt.encode(_claims(), private_key, algorithm="ES256")
         with pytest.raises(HTTPException) as exc:
             get_current_user(FakeRequest({"Authorization": f"Bearer {token}"}))
         assert exc.value.status_code == 401

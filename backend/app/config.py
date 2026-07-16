@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_service_key: str
     supabase_jwt_secret: str
+    # Expected JWT audience for Supabase user tokens (GoTrue uses "authenticated").
+    supabase_jwt_aud: str = "authenticated"
 
     openrouter_api_key: str
     # Fixed daily exam quota PER USER (does not shrink as more users join).
@@ -32,6 +34,15 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:5173"
     documents_bucket: str = "documents"
     exports_bucket: str = "exports"
+    # Reject documents whose downloaded bytes exceed this, before parsing them
+    # into memory. Defaults to 15 MiB.
+    max_document_bytes: int = 15 * 1024 * 1024
+
+    @property
+    def supabase_jwt_issuer(self) -> str:
+        """Expected `iss` claim — Supabase GoTrue issues tokens from
+        ``{project_url}/auth/v1``."""
+        return f"{self.supabase_url.rstrip('/')}/auth/v1"
 
     @property
     def cors_origins(self) -> list[str]:

@@ -1,4 +1,7 @@
+import asyncio
 import json
+
+from fastapi.concurrency import run_in_threadpool
 
 from ..models.schemas import ExamContent, ExamSpec
 from ..prompts.exam_prompt import SYSTEM_PROMPT, build_user_prompt
@@ -49,6 +52,28 @@ def _fix_points(content: ExamContent, spec: ExamSpec) -> ExamContent:
     return content
 
 
+# Transient LLM failures (all models rate-limited / network blips) are retried
+# with exponential backoff before giving up.
+_LLM_MAX_ATTEMPTS = 2
+_LLM_BACKOFF_BASE_SECONDS = 1.5
+
+
+async def _chat_with_backoff(messages: list[dict[str, str]]):
+    """Call the LLM, retrying transient RuntimeErrors with exponential backoff."""
+    last_error: Exception | None = None
+    for attempt in range(_LLM_MAX_ATTEMPTS):
+        try:
+            return await llm.chat(
+                messages, response_format_json=True, max_tokens=2500
+            )
+        except RuntimeError as e:
+            last_error = e
+            if attempt + 1 < _LLM_MAX_ATTEMPTS:
+                await asyncio.sleep(_LLM_BACKOFF_BASE_SECONDS * (2**attempt))
+    assert last_error is not None
+    raise last_error
+
+
 async def generate_exam(
     *,
     user_id: str,
@@ -67,9 +92,7 @@ async def generate_exam(
     cost_usd = 0.0  # accumulate across retries so we bill the true spend once
     for _ in range(2):
         try:
-            result = await llm.chat(
-                messages, response_format_json=True, max_tokens=2500
-            )
+            result = await _chat_with_backoff(messages)
             cost_usd += result.cost_usd
             payload = json.loads(_extract_json(result.content))
             content = ExamContent.model_validate(payload)
@@ -78,7 +101,8 @@ async def generate_exam(
                     f"Expected {spec.num_exercises} exercises, got {len(content.exercises)}"
                 )
             # One exam = one quota credit, billed with the full cost of all attempts.
-            usage_service.record_exam(user_id, cost_usd)
+            # The recording is a synchronous DB write — keep it off the loop.
+            await run_in_threadpool(usage_service.record_exam, user_id, cost_usd)
             return _fix_points(content, spec)
         # JSONDecodeError and pydantic's ValidationError both derive from
         # ValueError, so a single ValueError catch covers all three.
@@ -98,5 +122,5 @@ async def generate_exam(
 
     # All attempts failed: no exam credit consumed, but the spend still happened,
     # so account for it in the global budget.
-    usage_service.record_cost(user_id, cost_usd)
+    await run_in_threadpool(usage_service.record_cost, user_id, cost_usd)
     raise RuntimeError(f"Failed to generate a valid exam: {last_error}")
